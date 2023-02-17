@@ -2,31 +2,95 @@ import sys
 import os
 import re
 import time
-import cv2
-import screeninfo
+from threading import Thread
 from playsound import playsound
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 import windows
 
+class FullscreenImage(QtWidgets.QMainWindow):
+    '''
+    Fullscreen image widget catching press events
+    '''
+    def __init__(self, img_path, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(QtCore.Qt.WindowType.FramelessWindowHint) 
+        self.press_id = None
+        self.press_type = None
+        self.reaction_time = None
+        self.qimg = QtGui.QImage(img_path)
+        self.showFullScreen()
+
+    def keyPressEvent(self, event):
+        if event.key() and not self.press_id:
+            self.reaction_time = time.time()
+            self.press_id = int(event.key())
+            self.press_type = "keyboard"
+
+    def mousePressEvent(self, event):
+        if event.button() and not self.press_id:
+            self.reaction_time = time.time()
+            self.press_id = int(event.button())
+            self.press_type = "mouse"
+
+    def paintEvent(self, qpaint_event):
+        painter = QtGui.QPainter(self)
+        self.rect = qpaint_event.rect()
+        painter.drawImage(self.rect, self.qimg)
+
+class Worker(QtCore.QObject):
+    '''
+    Worker for running target task in a separate thread
+    '''
+    finished = QtCore.pyqtSignal()
+    progress = QtCore.pyqtSignal(dict)
+
+    def set_params(self, image_path_list, audio_path_list, delays_list):
+        self.image_path_list = image_path_list
+        self.audio_path_list = audio_path_list
+        self.delays_list = delays_list
+
+    def run(self):
+        '''
+        Shows images and plays audios in a loop with some delays after each iteration.
+        All the data about user events will be passed to the main thread in a dictionary.
+        '''
+        history = {
+            "press_id": [],
+            "press_type": [],
+            "reaction_time": []
+        }
+        for img_path, audio_path, delay in zip(self.image_path_list, self.audio_path_list, self.delays_list):
+            iteration_start = time.time()
+            window = FullscreenImage(img_path)
+            play = Thread(target=playsound, args=(audio_path,))
+            play.start()
+            play.join()
+            time.sleep(delay)
+            history["press_id"].append(window.press_id)
+            history["press_type"].append(window.press_type)
+            delta = (window.reaction_time - iteration_start) if window.reaction_time else None
+            history["reaction_time"].append(delta)
+        self.progress.emit(history)
+        self.finished.emit()
+
 class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
+    '''
+    Main application class
+    '''
     def __init__(self):
         super().__init__()
         self.setupUi(self)
         self.update_user_info()
+        self.clear_history()
 
-        self.fullscreen_window_name = "projector" # name for cv2 window
-        self.cv2_building_delay = 0.025 # delay between building a window and first image displaying
-                                        # if it is too small, first image will not be displayed (black screen bug, not enough time to load something)
-                                        # if it is too large, it will become very noticeable (black screen before first image)
-
-        # set instructions picture (top widget on the main window)
+        # draw instructions picture (top widget of the main window)
         scene = QtWidgets.QGraphicsScene()
-        pixmap = QtGui.QPixmap("./images/instructions.jpg")
+        pixmap = QtGui.QPixmap(os.path.join(".", "images", "instructions.png"))
         item = QtWidgets.QGraphicsPixmapItem(pixmap)
         scene.addItem(item)
         self.instructions_graphics_viewer.setScene(scene)
 
-        # left and right buttons callbacks
+        # buttons callbacks
         self.button_1.clicked.connect(self.start_experiment)
         self.button_2.clicked.connect(self.test)
 
@@ -38,6 +102,16 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
             "username": self.text_input_1.text().strip().replace(' ', '_'),
             "parameter": self.text_input_2.text().strip().replace(' ', '_'),
             "another_parameter": self.text_input_3.text().strip().replace(' ', '_')
+        }
+    
+    def clear_history(self):
+        '''
+        Sets history dictionary values to default values
+        '''
+        self.history = {
+            "press_id": None,             # pressed keys/buttons history
+            "press_type": None,     # types of events (mouse/keyboard)
+            "reaction_time": None   # reaction time history (in seconds)
         }
 
     def user_info_is_correct(self):
@@ -55,52 +129,53 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         else:
             return True
 
-    def build_cv2_fullscreen(self):
+    def set_buttons_state(self, state):
         '''
-        Build screen before experiment session (loop)
+        Enables or disables buttons of the main window
         '''
-        SCREEN_ID = 0
-        screen = screeninfo.get_monitors()[SCREEN_ID]
-        width, height = screen.width, screen.height
-        cv2.namedWindow(self.fullscreen_window_name, cv2.WND_PROP_FULLSCREEN)
-        cv2.moveWindow(self.fullscreen_window_name, screen.x - 1, screen.y - 1)
-        cv2.setWindowProperty(self.fullscreen_window_name, cv2.WND_PROP_FULLSCREEN,
-                              cv2.WINDOW_FULLSCREEN)
-        time.sleep(self.cv2_building_delay) # check init for more info
+        self.button_1.setEnabled(state)
+        self.button_2.setEnabled(state)
+    
+    def set_history(self, x):
+        '''
+        Experiment history setter
+        '''
+        self.history = x
+        print(self.history)
 
-    def img_audio_pair(self, img_filename: str, audio_filename: str, delay: float):
+    def build_thread(self, image_path_list, audio_path_list, delays_list):
         '''
-        Performs one stimulus (a pair of image and audio), then waits for <delay> seconds
-
-        img_filename: image path
-        audio_filename: audio path
-        delay: delay after stimulus in seconds
+        Builds thread where main experiment loop will be executed (including performing stimula)
         '''
-        cv2img = cv2.imread(img_filename, cv2.IMREAD_COLOR)
-        cv2.imshow(self.fullscreen_window_name, cv2img)
-        cv2.waitKey(1) # 1ms delay => sleep should be a bit less => delay = delay - 1ms
-        playsound(audio_filename)
-        time.sleep(delay)
+        self.thread = QtCore.QThread()
+        self.worker = Worker()
+        self.worker.set_params(image_path_list, audio_path_list, delays_list)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.thread.started.connect(lambda: self.set_buttons_state(False))
+        self.worker.progress.connect(lambda x: self.set_history(x))
+        self.thread.finished.connect(lambda: self.set_buttons_state(True))
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        # self.thread.finished.connect(lambda: print("Finished a thread!"))
 
     def test(self):
         '''
         This function is called whenever 'Test' button is pressed.
-        Shows one test image and plays one test audio with zero delay after stimulus.
+        Creates a thread which shows one test image and plays an audio with zero delay after stimulus.
         '''
-        self.hide()
-        self.build_cv2_fullscreen()
-        self.img_audio_pair(
-            os.path.join(".", "images", "test1.bmp"),
-            os.path.join(".", "audios", "test1.wav"),
-            0
-        )
-        cv2.destroyAllWindows()
-        self.show()
+        image_path_list = [os.path.join(".", "images", "test1.bmp")]
+        audio_path_list = [os.path.join(".", "audios", "test1.wav")]
+        delays_list = [0]
+        self.build_thread(image_path_list, audio_path_list, delays_list)
+        self.thread.start()
+        self.clear_history()
 
     def start_experiment(self):
         '''
         This function is called whenever 'Start' button is pressed.
-        Builds fullscreen, then shows images and plays audios in a loop with some delays after each iteration.
+        Creates a thread which shows images and plays audios in a loop with some delays after each iteration.
         '''
         # user's inputs dictionary stuff
         self.update_user_info()
@@ -109,22 +184,21 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         else:
             self.hide() # hide main application window
 
-        #self.hide() # hide main application window
-
         # This data will be read from some files. Feel free to change it.
-        image_paths = ["./images/test1.bmp", "./images/test2.jpeg", "./images/test3.png"]
-        audio_paths = ["./audios/test1.wav", "./audios/test2.mp3", "./audios/test3.ogg"]
-        delays = [1, 1, 1]
-        delays = [(elem - 0.001) for elem in delays] # we'll use 1 ms delay from cv2.waitKey(1)
+        image_path_list = [
+            os.path.join(".", "images", "test1.bmp"),
+            os.path.join(".", "images", "test2.jpeg"),
+            os.path.join(".", "images", "test3.png")
+        ]
+        audio_path_list = [
+            os.path.join(".", "audios", "test1.wav"),
+            os.path.join(".", "audios", "test2.mp3"),
+            os.path.join(".", "audios", "test3.ogg")
+        ]
+        delays_list = [1, 1, 1]
 
-        self.build_cv2_fullscreen()
-        for img_filename, audio_filename, delay in zip(image_paths, audio_paths, delays): # main experiment loop
-            self.img_audio_pair(img_filename, audio_filename, delay)
-
-        cv2.destroyAllWindows()
-        msg = windows.Message("SUCCESS!", f"Thank you for participating, {self.user_info['username']}!")
-        msg.show()
-        self.show()
+        self.build_thread(image_path_list, audio_path_list, delays_list)
+        self.thread.start()
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
