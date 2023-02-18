@@ -44,7 +44,7 @@ class Worker(QtCore.QObject):
     Worker for running target task in a separate thread
     '''
     finished = QtCore.pyqtSignal()
-    progress = QtCore.pyqtSignal(dict)
+    progress = QtCore.pyqtSignal(pd.DataFrame)
 
     def set_params(self, image_path_list, audio_path_list, delays_list,
                    labels, ip, port):
@@ -60,35 +60,49 @@ class Worker(QtCore.QObject):
         Shows images and plays audios in a loop with some delays after each iteration.
         All the data about user events will be passed to the main thread in a dictionary.
         '''
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.connect((self.ip, self.port))
+        # client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # client.connect((self.ip, self.port))
 
+        '''
         history = {
             "press_id": [],
             "press_type": [],
-            "label": [],
             "reaction_time": []
         }
-        for img_path, audio_path, delay, label in zip(self.image_path_list, self.audio_path_list,
-                                                      self.delays_list, self.labels):
-            iteration_start = time.time()
-            window = FullscreenImage(img_path)
-            play = Thread(target=playsound, args=(audio_path,))
+        '''
+        buttons, times = [], []
+        for img_path, audio_path, labels in zip(self.image_path_list, self.audio_path_list,
+                                               self.labels):
+            window = FullscreenImage(img_path[0])
+            play = Thread(target=playsound, args=(audio_path[0],))
             play.start()
             play.join()
-            time.sleep(delay / 1000)
-            history["press_id"].append(window.press_id)
-            history["press_type"].append(window.press_type)
-            history["label"].append(label)
+            time.sleep(self.delays_list[0] / 1000)
 
-            client.send(str(label).encode('utf-8'))
+            iteration_start = time.time()
+            window = FullscreenImage(img_path[1])
+            play = Thread(target=playsound, args=(audio_path[1],))
+            play.start()
+            play.join()
+            time.sleep(self.delays_list[1] / 1000)
 
             delta = (window.reaction_time - iteration_start) if window.reaction_time else None
-            history["reaction_time"].append(delta * 1000 if delta else None)  # in ms
 
-        client.close()
+            buttons.append(window.press_id)
+            times.append(delta * 1000 if delta else None)
 
-        self.progress.emit(history)
+            # history["press_id"].append(window.press_id)
+            # history["press_type"].append(window.press_type)
+            # history["reaction_time"].append(delta * 1000 if delta else None)  # in ms
+
+            # client.send(str(label).encode('utf-8'))
+
+        # client.close()
+        result = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+        result['response'] = buttons
+        result['response_time'] = times
+
+        self.progress.emit(result)
         self.finished.emit()
 
 class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
@@ -99,7 +113,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         super().__init__()
         self.setupUi(self)
         self.update_user_info()
-        self.clear_history()
+        # self.clear_history()
 
         # draw instructions picture (top widget of the main window)
         scene = QtWidgets.QGraphicsScene()
@@ -126,12 +140,14 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         '''
         Sets history dictionary values to default values
         '''
+        '''
         self.history = {
             "press_id": None,       # pressed keys/buttons history
             "press_type": None,     # types of events (mouse/keyboard)
-            "label": None,          # label provided in experiment.csv
             "reaction_time": None   # reaction time history (in seconds)
         }
+        '''
+        pass
 
     def user_info_is_correct(self):
         '''
@@ -160,7 +176,8 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         Experiment history setter
         '''
         self.history = x
-        pd.DataFrame(x).to_csv(os.path.join(".", "data", "result.csv"), index=False)
+        filename = f"{self.user_info['username']}_{self.user_info['parameter']}_{self.user_info['another_parameter']}.csv"
+        x.to_csv(os.path.join(".", "data", filename), index=False)
         print(self.history)
 
     def build_thread(self, image_path_list, audio_path_list, delays_list, labels, ip, port):
@@ -191,7 +208,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         delays_list = [0]
         self.build_thread(image_path_list, audio_path_list, delays_list)
         self.thread.start()
-        self.clear_history()
+        # self.clear_history()
 
     def start_experiment(self):
         '''
@@ -208,24 +225,24 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         # This data will be read from some files.
         config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
         experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
-        pairs = pd.read_csv(os.path.join(".", "cfg", "pairs.csv"))
 
         images_dir = os.path.join(".", "data", "images")
         audios_dir = os.path.join(".", "data", "audios")
 
-        pairs['image'] = images_dir + os.sep + pairs['image']
-        pairs['audio'] = audios_dir + os.sep + pairs['audio']
+        experiment['image1'] = images_dir + os.sep + experiment['image1']
+        experiment['image2'] = images_dir + os.sep + experiment['image2']
 
-        inds = experiment[['pair1', 'pair2']].to_numpy().reshape(-1).ravel()
-        labels = experiment[['label1', 'label2']].to_numpy().reshape(-1).ravel()
+        experiment['audio1'] = audios_dir + os.sep + experiment['audio1']
+        experiment['audio2'] = audios_dir + os.sep + experiment['audio2']
 
-        n_pairs = pairs.shape[0]
-        pairs = pairs.iloc[inds]
+        delays_list = [config.inner_delay[0], config.outer_delay[0]]
 
-        delays_list = [config.iloc[0, 0], config.iloc[0, 1]] * n_pairs
-
-        self.build_thread(pairs.image.values, pairs.audio.values, delays_list, labels,
-                          ip=config.iloc[0, 2], port=config.iloc[0, 3])
+        self.build_thread(
+            experiment[['image1', 'image2']].to_numpy(), 
+            experiment[['audio1', 'audio2']].to_numpy(), 
+            delays_list, experiment[['label1', 'label2']].to_numpy(),
+            ip=config.ip[0], port=config.port[0]
+        )
         self.thread.start()
 
 def main():
