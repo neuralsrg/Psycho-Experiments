@@ -5,6 +5,7 @@ import time
 from threading import Thread
 from playsound import playsound
 from PyQt5 import QtWidgets, QtGui, QtCore
+import pandas as pd
 import windows
 
 class FullscreenImage(QtWidgets.QMainWindow):
@@ -44,10 +45,11 @@ class Worker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     progress = QtCore.pyqtSignal(dict)
 
-    def set_params(self, image_path_list, audio_path_list, delays_list):
+    def set_params(self, image_path_list, audio_path_list, delays_list, labels):
         self.image_path_list = image_path_list
         self.audio_path_list = audio_path_list
         self.delays_list = delays_list
+        self.labels = labels
 
     def run(self):
         '''
@@ -57,20 +59,26 @@ class Worker(QtCore.QObject):
         history = {
             "press_id": [],
             "press_type": [],
+            "label": [],
             "reaction_time": []
         }
-        for img_path, audio_path, delay in zip(self.image_path_list, self.audio_path_list, self.delays_list):
+        for img_path, audio_path, delay, label in zip(self.image_path_list, self.audio_path_list,
+                                                      self.delays_list, self.labels):
             iteration_start = time.time()
             window = FullscreenImage(img_path)
             play = Thread(target=playsound, args=(audio_path,))
             play.start()
             play.join()
-            time.sleep(delay)
-            # history["press_id"].append(window.press_id)
-            # history["press_type"].append(window.press_type)
-            print(window.press_id)
-            # delta = (window.reaction_time - iteration_start) if window.reaction_time else None
-            # history["reaction_time"].append(delta)
+            time.sleep(delay / 1000)
+            history["press_id"].append(window.press_id)
+            history["press_type"].append(window.press_type)
+            history["label"].append(label)
+
+            # s.send()
+
+            delta = (window.reaction_time - iteration_start) if window.reaction_time else -1
+            history["reaction_time"].append(delta * 1000)  # in ms
+
         self.progress.emit(history)
         self.finished.emit()
 
@@ -110,8 +118,9 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         Sets history dictionary values to default values
         '''
         self.history = {
-            "press_id": None,             # pressed keys/buttons history
+            "press_id": None,       # pressed keys/buttons history
             "press_type": None,     # types of events (mouse/keyboard)
+            "label": None,          # label provided in experiment.csv
             "reaction_time": None   # reaction time history (in seconds)
         }
 
@@ -142,15 +151,16 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         Experiment history setter
         '''
         self.history = x
+        pd.DataFrame(x).to_csv(os.path.join(".", "data", "result.csv"), index=False)
         print(self.history)
 
-    def build_thread(self, image_path_list, audio_path_list, delays_list):
+    def build_thread(self, image_path_list, audio_path_list, delays_list, labels):
         '''
         Builds thread where main experiment loop will be executed (including performing stimula)
         '''
         self.thread = QtCore.QThread()
         self.worker = Worker()
-        self.worker.set_params(image_path_list, audio_path_list, delays_list)
+        self.worker.set_params(image_path_list, audio_path_list, delays_list, labels)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.thread.started.connect(lambda: self.set_buttons_state(False))
@@ -185,20 +195,26 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         else:
             self.hide() # hide main application window
 
-        # This data will be read from some files. Feel free to change it.
-        image_path_list = [
-            os.path.join(".", "data", "images", "test1.bmp"),
-            os.path.join(".", "data", "images", "test2.jpeg"),
-            os.path.join(".", "data", "images", "test3.png")
-        ]
-        audio_path_list = [
-            os.path.join(".", "data", "audios", "test1.wav"),
-            os.path.join(".", "data", "audios", "test2.mp3"),
-            os.path.join(".", "data", "audios", "test3.ogg")
-        ]
-        delays_list = [1, 1, 1]
+        # This data will be read from some files.
+        config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
+        experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+        pairs = pd.read_csv(os.path.join(".", "cfg", "pairs.csv"))
 
-        self.build_thread(image_path_list, audio_path_list, delays_list)
+        images_dir = os.path.join(".", "data", "images")
+        audios_dir = os.path.join(".", "data", "audios")
+
+        pairs['image'] = images_dir + os.sep + pairs['image']
+        pairs['audio'] = audios_dir + os.sep + pairs['audio']
+
+        inds = experiment[['pair1', 'pair2']].to_numpy().reshape(-1).ravel()
+        labels = experiment[['label1', 'label2']].to_numpy().reshape(-1).ravel()
+
+        n_pairs = pairs.shape[0]
+        pairs = pairs.iloc[inds]
+
+        delays_list = [config.iloc[0, 0], config.iloc[0, 1]] * n_pairs
+
+        self.build_thread(pairs.image.values, pairs.audio.values, delays_list, labels)
         self.thread.start()
 
 def main():
