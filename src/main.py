@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import time
+import socket
 from threading import Thread
 from playsound import playsound
 from PyQt5 import QtWidgets, QtGui, QtCore
@@ -45,17 +46,23 @@ class Worker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     progress = QtCore.pyqtSignal(dict)
 
-    def set_params(self, image_path_list, audio_path_list, delays_list, labels):
+    def set_params(self, image_path_list, audio_path_list, delays_list,
+                   labels, ip, port):
         self.image_path_list = image_path_list
         self.audio_path_list = audio_path_list
         self.delays_list = delays_list
         self.labels = labels
+        self.ip = ip
+        self.port = port
 
     def run(self):
         '''
         Shows images and plays audios in a loop with some delays after each iteration.
         All the data about user events will be passed to the main thread in a dictionary.
         '''
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect((self.ip, self.port))
+
         history = {
             "press_id": [],
             "press_type": [],
@@ -74,10 +81,12 @@ class Worker(QtCore.QObject):
             history["press_type"].append(window.press_type)
             history["label"].append(label)
 
-            # s.send()
+            client.send(str(label).encode('utf-8'))
 
-            delta = (window.reaction_time - iteration_start) if window.reaction_time else -1
-            history["reaction_time"].append(delta * 1000)  # in ms
+            delta = (window.reaction_time - iteration_start) if window.reaction_time else None
+            history["reaction_time"].append(delta * 1000 if delta else None)  # in ms
+
+        client.close()
 
         self.progress.emit(history)
         self.finished.emit()
@@ -154,13 +163,14 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         pd.DataFrame(x).to_csv(os.path.join(".", "data", "result.csv"), index=False)
         print(self.history)
 
-    def build_thread(self, image_path_list, audio_path_list, delays_list, labels):
+    def build_thread(self, image_path_list, audio_path_list, delays_list, labels, ip, port):
         '''
         Builds thread where main experiment loop will be executed (including performing stimula)
         '''
         self.thread = QtCore.QThread()
         self.worker = Worker()
-        self.worker.set_params(image_path_list, audio_path_list, delays_list, labels)
+        self.worker.set_params(image_path_list, audio_path_list, delays_list,
+                               labels, ip, port)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.thread.started.connect(lambda: self.set_buttons_state(False))
@@ -214,7 +224,8 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         delays_list = [config.iloc[0, 0], config.iloc[0, 1]] * n_pairs
 
-        self.build_thread(pairs.image.values, pairs.audio.values, delays_list, labels)
+        self.build_thread(pairs.image.values, pairs.audio.values, delays_list, labels,
+                          ip=config.iloc[0, 2], port=config.iloc[0, 3])
         self.thread.start()
 
 def main():
