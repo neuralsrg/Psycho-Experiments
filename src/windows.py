@@ -83,7 +83,7 @@ class Ui_MainWindow(object):
 class Message:
     def __init__(self, msg1="ERROR!", msg2="ERROR!"):
         self.msg = QtWidgets.QMessageBox()
-        self.msg.setIcon(QtWidgets.QMessageBox.Critical)
+        self.msg.setIcon(QtWidgets.QMessageBox.Information)
         self.msg.setWindowTitle(msg1)
         self.msg.setText(msg2)
     

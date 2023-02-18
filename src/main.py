@@ -6,7 +6,10 @@ import cv2
 import screeninfo
 from playsound import playsound
 from PyQt5 import QtWidgets, QtGui
+import pandas as pd
+
 import windows
+
 
 class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
     def __init__(self):
@@ -61,7 +64,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         '''
         SCREEN_ID = 0
         screen = screeninfo.get_monitors()[SCREEN_ID]
-        width, height = screen.width, screen.height
+        # width, height = screen.width, screen.height
         cv2.namedWindow(self.fullscreen_window_name, cv2.WND_PROP_FULLSCREEN)
         cv2.moveWindow(self.fullscreen_window_name, screen.x - 1, screen.y - 1)
         cv2.setWindowProperty(self.fullscreen_window_name, cv2.WND_PROP_FULLSCREEN,
@@ -112,14 +115,23 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         #self.hide() # hide main application window
 
         # This data will be read from some files. Feel free to change it.
-        image_paths = ["./images/test1.bmp", "./images/test2.jpeg", "./images/test3.png"]
-        audio_paths = ["./audios/test1.wav", "./audios/test2.mp3", "./audios/test3.ogg"]
-        delays = [1, 1, 1]
-        delays = [(elem - 0.001) for elem in delays] # we'll use 1 ms delay from cv2.waitKey(1)
+        pairs_data = pd.read_csv('./cfg/pairs.csv')
+        cfg_data = pd.read_csv('./cfg/config.csv')
+
+        # image_paths = ["./images/test1.bmp", "./images/test2.jpeg", "./images/test3.png"]
+        # audio_paths = ["./audios/test1.wav", "./audios/test2.mp3", "./audios/test3.ogg"]
+
+        image_paths = pairs_data['image'].values
+        audio_paths = pairs_data['sound'].values
+
+        # delays = [1, 1, 1]
+        # delays = [(elem - 0.001) for elem in delays] # we'll use 1 ms delay from cv2.waitKey(1)
+        inner_delay, outer_delay = cfg_data['inner_delay'], cfg_data['outer_delay']
 
         self.build_cv2_fullscreen()
-        for img_filename, audio_filename, delay in zip(image_paths, audio_paths, delays): # main experiment loop
-            self.img_audio_pair(img_filename, audio_filename, delay)
+        for img_filename, audio_filename in zip(image_paths, audio_paths): # main experiment loop
+            self.img_audio_pair(img_filename, audio_filename, inner_delay)
+            self.img_audio_pair(img_filename, audio_filename, outer_delay)
 
         cv2.destroyAllWindows()
         msg = windows.Message("SUCCESS!", f"Thank you for participating, {self.user_info['username']}!")
