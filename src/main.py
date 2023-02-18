@@ -66,10 +66,11 @@ class Worker(QtCore.QObject):
             play.start()
             play.join()
             time.sleep(delay)
-            history["press_id"].append(window.press_id)
-            history["press_type"].append(window.press_type)
-            delta = (window.reaction_time - iteration_start) if window.reaction_time else None
-            history["reaction_time"].append(delta)
+            # history["press_id"].append(window.press_id)
+            # history["press_type"].append(window.press_type)
+            print(window.press_id)
+            # delta = (window.reaction_time - iteration_start) if window.reaction_time else None
+            # history["reaction_time"].append(delta)
         self.progress.emit(history)
         self.finished.emit()
 
@@ -85,7 +86,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         # draw instructions picture (top widget of the main window)
         scene = QtWidgets.QGraphicsScene()
-        pixmap = QtGui.QPixmap(os.path.join(".", "images", "instructions.png"))
+        pixmap = QtGui.QPixmap(os.path.join(".", "data", "images", "instructions.jpg"))
         item = QtWidgets.QGraphicsPixmapItem(pixmap)
         scene.addItem(item)
         self.instructions_graphics_viewer.setScene(scene)
@@ -165,8 +166,8 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         This function is called whenever 'Test' button is pressed.
         Creates a thread which shows one test image and plays an audio with zero delay after stimulus.
         '''
-        image_path_list = [os.path.join(".", "images", "test1.bmp")]
-        audio_path_list = [os.path.join(".", "audios", "test1.wav")]
+        image_path_list = [os.path.join(".", "data", "images", "test1.bmp")]
+        audio_path_list = [os.path.join(".", "data", "audios", "test1.wav")]
         delays_list = [0]
         self.build_thread(image_path_list, audio_path_list, delays_list)
         self.thread.start()
@@ -186,14 +187,14 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         # This data will be read from some files. Feel free to change it.
         image_path_list = [
-            os.path.join(".", "images", "test1.bmp"),
-            os.path.join(".", "images", "test2.jpeg"),
-            os.path.join(".", "images", "test3.png")
+            os.path.join(".", "data", "images", "test1.bmp"),
+            os.path.join(".", "data", "images", "test2.jpeg"),
+            os.path.join(".", "data", "images", "test3.png")
         ]
         audio_path_list = [
-            os.path.join(".", "audios", "test1.wav"),
-            os.path.join(".", "audios", "test2.mp3"),
-            os.path.join(".", "audios", "test3.ogg")
+            os.path.join(".", "data", "audios", "test1.wav"),
+            os.path.join(".", "data", "audios", "test2.mp3"),
+            os.path.join(".", "data", "audios", "test3.ogg")
         ]
         delays_list = [1, 1, 1]
 
