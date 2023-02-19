@@ -87,7 +87,8 @@ class Worker(QtCore.QObject):
         All the data about user events will be passed to the main thread in a dictionary.
         '''
         def send_message(message):
-            self.client.send(bytes(str(message),"utf-8") + bytes("\n","utf-8"))
+            if message:
+                self.client.send(bytes(str(message),"utf-8") + bytes("\n","utf-8"))
 
         buttons, times = [], []
         for img_path, audio_path, labels in zip(self.image_path_list, self.audio_path_list,
