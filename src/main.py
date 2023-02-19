@@ -16,20 +16,27 @@ class FullscreenImage(QtWidgets.QMainWindow):
     '''
     Fullscreen image widget catching press events
     '''
-    def __init__(self, img_path, parent=None):
+    def __init__(self, img_path, parent=None, pause_screen=False):
         super().__init__(parent)
         self.setWindowFlags(QtCore.Qt.WindowType.FramelessWindowHint) 
         self.press_id = None
         self.press_type = None
         self.reaction_time = None
+        self.pause_flag = pause_screen
         self.qimg = QtGui.QImage(img_path)
         self.showFullScreen()
 
     def keyPressEvent(self, event):
-        if event.key() and not self.press_id:
+        SPACE = 32
+        if event.key() and not self.press_id and int(event.key()) != SPACE:
             self.reaction_time = time.time()
             self.press_id = int(event.key())
             self.press_type = "keyboard"
+        elif event.key() and int(event.key()) == SPACE:
+            self.pause_flag = not self.pause_flag
+            if self.pause_flag:
+                pause_msg = windows.Message("PAUSE", "Current experiment will be paused after this iteration")
+                pause_msg.show()
 
     def mousePressEvent(self, event):
         if event.button() and not self.press_id:
@@ -61,6 +68,18 @@ class Worker(QtCore.QObject):
         self.port = port
         self.test_flag = test
 
+    def pause(self):
+        window = FullscreenImage(
+            os.path.join(".", "data", "images", "pause.png"),
+            pause_screen=True
+        )
+        while window.pause_flag:
+            pass
+
+    def terminate(self, result=None):
+        self.progress.emit(result)
+        self.finished.emit()
+
     def run(self):
         '''
         Shows images and plays audios in a loop with some delays after each iteration.
@@ -82,10 +101,17 @@ class Worker(QtCore.QObject):
             # first stimul
 
             # cut file
-            fs, s = wavfile.read(audio_path[0])
-            s = s[:int(fs * self.stim_times[0] / 1000)]
-            filename = os.path.join(os.path.dirname(audio_path[0]), next(tempfile._get_candidate_names()) + '.wav')
-            wavfile.write(filename, fs, s)
+            try:
+                fs, s = wavfile.read(audio_path[0])
+                s = s[:int(fs * self.stim_times[0] / 1000)]
+                filename = os.path.join(os.path.dirname(audio_path[0]), next(tempfile._get_candidate_names()) + '.wav')
+                wavfile.write(filename, fs, s)
+            except:
+                error = window.Message("ERRROR!", f"Unable to create temporary .wav (file {audio_path[0]} probably doesn't exist)! " +
+                                                   "This experiment will be terminated...")
+                error.show()
+                self.terminate()
+                return
 
             window = FullscreenImage(img_path[0])
             play = Thread(target=playsound, args=(filename,))
@@ -93,14 +119,23 @@ class Worker(QtCore.QObject):
             play.join()
             os.remove(filename)  # remove temporary file
             time.sleep(self.delays_list[0] / 1000)
+            if window.pause_flag:
+                self.pause()
 
             # second stimul
 
             # cut file
-            fs, s = wavfile.read(audio_path[1])
-            s = s[:int(fs * self.stim_times[1] / 1000)]
-            filename = os.path.join(os.path.dirname(audio_path[1]), next(tempfile._get_candidate_names()) + '.wav')
-            wavfile.write(filename, fs, s)
+            try:
+                fs, s = wavfile.read(audio_path[1])
+                s = s[:int(fs * self.stim_times[1] / 1000)]
+                filename = os.path.join(os.path.dirname(audio_path[1]), next(tempfile._get_candidate_names()) + '.wav')
+                wavfile.write(filename, fs, s)
+            except:
+                error = window.Message("ERRROR!", f"Unable to create temporary .wav (file {audio_path[1]} probably doesn't exist)! " +
+                                                   "This experiment will be terminated...")
+                error.show()
+                self.terminate()
+                return
 
             iteration_start = time.time()
             window = FullscreenImage(img_path[1])
@@ -115,6 +150,8 @@ class Worker(QtCore.QObject):
 
             buttons.append(window.press_id)
             times.append(delta * 1000 if delta else None)
+            if window.pause_flag:
+                self.pause()
 
             # history["press_id"].append(window.press_id)
             # history["press_type"].append(window.press_type)
@@ -128,8 +165,7 @@ class Worker(QtCore.QObject):
             result['response'] = buttons
             result['response_time'] = times
 
-        self.progress.emit(result)
-        self.finished.emit()
+        self.terminate(result)
 
 
 class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
@@ -235,19 +271,30 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         This function is called whenever 'Test' button is pressed.
         Creates a thread which shows one test image and plays an audio with zero delay after stimulus.
         '''
-        config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
-        experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+        try:
+            config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
+            experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+        except:
+            error = windows.Message("ERROR!", "Unable to read config or experiment file(s)!")
+            error.show()
+            return
 
         image_path_list = [[os.path.join(".", "data", "images", "test1.bmp")] * 2]
         audio_path_list = [[os.path.join(".", "data", "audios", "test1.wav")] * 2]
         delays_list = [config.inner_delay[0], config.outer_delay[0]]
 
-        self.build_thread(image_path_list, audio_path_list,
-            delays_list, experiment[['label1', 'label2']].to_numpy(),
-            config[['first_stim', 'second_stim']].to_numpy().ravel(),
-            config['outer_delay_ceil'][0],
-            ip=config.ip[0], port=config.port[0], test=True
-        )
+        try:
+            self.build_thread(image_path_list, audio_path_list,
+                delays_list, experiment[['label1', 'label2']].to_numpy(),
+                config[['first_stim', 'second_stim']].to_numpy().ravel(),
+                config['outer_delay_ceil'][0],
+                ip=config.ip[0], port=config.port[0], test=True
+            )
+        except:
+            error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
+            error.show()
+            return
+
         self.thread.start()
         # self.clear_history()
 
@@ -264,8 +311,13 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
             self.hide() # hide main application window
 
         # This data will be read from some files.
-        config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
-        experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+        try:
+            config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
+            experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+        except:
+            error = windows.Message("ERROR!", "Unable to read config or experiment file(s)!")
+            error.show()
+            return
 
         images_dir = os.path.join(".", "data", "images")
         audios_dir = os.path.join(".", "data", "audios")
@@ -278,14 +330,20 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         delays_list = [config.inner_delay[0], config.outer_delay[0]]
 
-        self.build_thread(
-            experiment[['image1', 'image2']].to_numpy(), 
-            experiment[['audio1', 'audio2']].to_numpy(), 
-            delays_list, experiment[['label1', 'label2']].to_numpy(),
-            config[['first_stim', 'second_stim']].to_numpy().ravel(),
-            config['outer_delay_ceil'][0],
-            ip=config.ip[0], port=config.port[0]
-        )
+        try:
+            self.build_thread(
+                experiment[['image1', 'image2']].to_numpy(), 
+                experiment[['audio1', 'audio2']].to_numpy(), 
+                delays_list, experiment[['label1', 'label2']].to_numpy(),
+                config[['first_stim', 'second_stim']].to_numpy().ravel(),
+                config['outer_delay_ceil'][0],
+                ip=config.ip[0], port=config.port[0]
+            )
+        except:
+            error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
+            error.show()
+            return
+
         self.thread.start()
 
 def main():
