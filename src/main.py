@@ -4,6 +4,7 @@ import re
 import time
 import socket
 import tempfile
+import glob
 from scipy.io import wavfile
 from threading import Thread
 from playsound import playsound
@@ -57,7 +58,7 @@ class Worker(QtCore.QObject):
     progress = QtCore.pyqtSignal(pd.DataFrame)
 
     def set_params(self, image_path_list, audio_path_list, delays_list,
-                   labels, stim_times, outer_delay_ceil, ip, port, test):
+                   labels, stim_times, outer_delay_ceil, ip, port, test, config_path):
         self.image_path_list = image_path_list
         self.audio_path_list = audio_path_list
         self.delays_list = delays_list
@@ -67,6 +68,7 @@ class Worker(QtCore.QObject):
         self.ip = ip
         self.port = port
         self.test_flag = test
+        self.config_path = config_path
 
     def pause(self):
         window = FullscreenImage(
@@ -160,7 +162,7 @@ class Worker(QtCore.QObject):
             # client.send(str(label).encode('utf-8'))
 
         # client.close()
-        result = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+        result = pd.read_csv(self.config_path)
         if not self.test_flag:
             result['response'] = buttons
             result['response_time'] = times
@@ -172,15 +174,18 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
     '''
     Main application class
     '''
-    def __init__(self):
+    def __init__(self, config_path):
         super().__init__()
         self.setupUi(self)
         self.update_user_info()
+
+        self.write_history = True
+        self.config_path = config_path
         # self.clear_history()
 
         # draw instructions picture (top widget of the main window)
         scene = QtWidgets.QGraphicsScene()
-        pixmap = QtGui.QPixmap(os.path.join(".", "data", "images", "instructions.jpg"))
+        pixmap = QtGui.QPixmap(os.path.join(".", "data", "images", "test2.jpeg"))
         item = QtWidgets.QGraphicsPixmapItem(pixmap)
         scene.addItem(item)
         self.instructions_graphics_viewer.setScene(scene)
@@ -238,14 +243,19 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         '''
         Experiment history setter
         '''
-        self.history = x
-        res_dir = os.path.join(".", "results")
-        if not os.path.isdir(res_dir):
-            os.mkdir(res_dir)
+        if self.write_history:
+            res_dir = os.path.join(".", "results")
+            if not os.path.isdir(res_dir):
+                os.mkdir(res_dir)
 
-        filename = f"{self.user_info['username']}_{self.user_info['parameter']}_{self.user_info['another_parameter']}.csv"
-        x.to_csv(os.path.join(res_dir, filename), index=False)
-        print(self.history)
+            filename = f"{self.user_info['username']}_{self.user_info['parameter']}_{self.user_info['another_parameter']}.csv"
+
+            cols = x.columns.to_list()
+            cols = cols[:6] + cols[-2:] + cols[6: 13]
+            x = x[cols]
+            self.history = x
+            x.to_csv(os.path.join(res_dir, filename), index=False)
+            print(self.history)
 
     def build_thread(self, image_path_list, audio_path_list, delays_list,
                      labels, stim_times, outer_delay_ceil, ip, port, test=False):
@@ -255,7 +265,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         self.thread = QtCore.QThread()
         self.worker = Worker()
         self.worker.set_params(image_path_list, audio_path_list, delays_list,
-                               labels, stim_times, outer_delay_ceil, ip, port, test)
+                               labels, stim_times, outer_delay_ceil, ip, port, test, self.config_path)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.thread.started.connect(lambda: self.set_buttons_state(False))
@@ -271,9 +281,10 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         This function is called whenever 'Test' button is pressed.
         Creates a thread which shows one test image and plays an audio with zero delay after stimulus.
         '''
+        self.write_history = False
         try:
-            config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
-            experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+            # config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
+            experiment = pd.read_csv(self.config_path)
         except:
             error = windows.Message("ERROR!", "Unable to read config or experiment file(s)!")
             error.show()
@@ -281,14 +292,14 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         image_path_list = [[os.path.join(".", "data", "images", "test1.bmp")] * 2]
         audio_path_list = [[os.path.join(".", "data", "audios", "test1.wav")] * 2]
-        delays_list = [config.inner_delay[0], config.outer_delay[0]]
+        delays_list = [experiment.inner_delay[0], experiment.outer_delay[0]]
 
         try:
             self.build_thread(image_path_list, audio_path_list,
                 delays_list, experiment[['label1', 'label2']].to_numpy(),
-                config[['first_stim', 'second_stim']].to_numpy().ravel(),
-                config['outer_delay_ceil'][0],
-                ip=config.ip[0], port=config.port[0], test=True
+                [experiment.first_stim[0], experiment.second_stim[0]],
+                experiment.outer_delay_ceil[0],
+                ip=experiment.ip[0], port=experiment.port[0], test=True
             )
         except:
             error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
@@ -303,6 +314,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         This function is called whenever 'Start' button is pressed.
         Creates a thread which shows images and plays audios in a loop with some delays after each iteration.
         '''
+        self.write_history = True
         # user's inputs dictionary stuff
         self.update_user_info()
         if not self.user_info_is_correct():
@@ -312,8 +324,8 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         # This data will be read from some files.
         try:
-            config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
-            experiment = pd.read_csv(os.path.join(".", "cfg", "experiment.csv"))
+            # config = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
+            experiment = pd.read_csv(self.config_path)
         except:
             error = windows.Message("ERROR!", "Unable to read config or experiment file(s)!")
             error.show()
@@ -328,16 +340,16 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         experiment['audio1'] = audios_dir + os.sep + experiment['audio1']
         experiment['audio2'] = audios_dir + os.sep + experiment['audio2']
 
-        delays_list = [config.inner_delay[0], config.outer_delay[0]]
+        delays_list = [experiment.inner_delay[0], experiment.outer_delay[0]]
 
         try:
             self.build_thread(
                 experiment[['image1', 'image2']].to_numpy(), 
                 experiment[['audio1', 'audio2']].to_numpy(), 
                 delays_list, experiment[['label1', 'label2']].to_numpy(),
-                config[['first_stim', 'second_stim']].to_numpy().ravel(),
-                config['outer_delay_ceil'][0],
-                ip=config.ip[0], port=config.port[0]
+                [experiment.first_stim[0], experiment.second_stim[0]],
+                experiment.outer_delay_ceil[0],
+                ip=experiment.ip[0], port=experiment.port[0]
             )
         except:
             error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
@@ -346,12 +358,15 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         self.thread.start()
 
-def main():
+def main(config_file ):
     app = QtWidgets.QApplication(sys.argv)
-    window = AppMainWindow()
+    window = AppMainWindow(config_path=config_file)
     window.show()
     app.exec_()
 
 #if not imported
 if __name__ == '__main__':
-    main()
+
+    cfg_dir = os.path.join(".", "cfg")  # config files directory
+    for config_file in glob.glob(os.path.join(cfg_dir, "*.csv")):  # for all config files listed in cfg_dir
+        main(config_file=config_file)

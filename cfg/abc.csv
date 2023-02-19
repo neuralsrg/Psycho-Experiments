@@ -1,0 +1,2 @@
+label1,image1,audio1,label2,image2,audio2,inner_delay,outer_delay,first_stim,second_stim,outer_delay_ceil,ip,port
+1,test2.jpeg,test1.wav,2,test2.jpeg,test3.wav,1000,1000,1000,1000,100,127.0.0.1,8888

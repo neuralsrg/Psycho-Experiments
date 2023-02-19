@@ -1,2 +1,0 @@
-inner_delay,outer_delay,first_stim,second_stim,outer_delay_ceil,ip,port
-1000,3000,3000,2000,1000,127.0.0.1,8888
