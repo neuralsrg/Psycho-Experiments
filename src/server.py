@@ -1,9 +1,10 @@
 import socket
 import os
+import glob
 import pandas as pd
 
 
-cfg = pd.read_csv(os.path.join(".", "cfg", "config.csv"))
+cfg = pd.read_csv(os.path.join(".", "src", "socket_config.csv"))
 IP, PORT = cfg.ip[0], cfg.port[0]
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

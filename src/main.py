@@ -57,18 +57,17 @@ class Worker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     progress = QtCore.pyqtSignal(pd.DataFrame)
 
-    def set_params(self, image_path_list, audio_path_list, delays_list,
-                   labels, stim_times, outer_delay_ceil, ip, port, test, config_path):
+    def set_params(self, image_path_list, audio_path_list, delays_list, labels,
+                   stim_times, outer_delay_ceil, test, config_path, client):
         self.image_path_list = image_path_list
         self.audio_path_list = audio_path_list
         self.delays_list = delays_list
         self.labels = labels
         self.stim_times = stim_times
         self.outer_delay_ceil = outer_delay_ceil
-        self.ip = ip
-        self.port = port
         self.test_flag = test
         self.config_path = config_path
+        self.client = client
 
     def pause(self):
         window = FullscreenImage(
@@ -87,16 +86,9 @@ class Worker(QtCore.QObject):
         Shows images and plays audios in a loop with some delays after each iteration.
         All the data about user events will be passed to the main thread in a dictionary.
         '''
-        # client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # client.connect((self.ip, self.port))
+        def send_message(message):
+            self.client.send(bytes(str(message),"utf-8") + bytes("\n","utf-8"))
 
-        '''
-        history = {
-            "press_id": [],
-            "press_type": [],
-            "reaction_time": []
-        }
-        '''
         buttons, times = [], []
         for img_path, audio_path, labels in zip(self.image_path_list, self.audio_path_list,
                                                 self.labels):
@@ -116,6 +108,15 @@ class Worker(QtCore.QObject):
                 return
 
             window = FullscreenImage(img_path[0])
+
+            # sending label
+            try:
+                sender = Thread(target=send_message, args=(labels[0],))
+                sender.start()
+            except:
+                pass
+
+            # sound
             play = Thread(target=playsound, args=(filename,))
             play.start()
             play.join()
@@ -141,6 +142,15 @@ class Worker(QtCore.QObject):
 
             iteration_start = time.time()
             window = FullscreenImage(img_path[1])
+
+            # sending label
+            try:
+                sender = Thread(target=send_message, args=(labels[1],))
+                sender.start()
+            except:
+                pass
+
+            # sound
             play = Thread(target=playsound, args=(filename,))
             play.start()
             play.join()
@@ -155,13 +165,6 @@ class Worker(QtCore.QObject):
             if window.pause_flag:
                 self.pause()
 
-            # history["press_id"].append(window.press_id)
-            # history["press_type"].append(window.press_type)
-            # history["reaction_time"].append(delta * 1000 if delta else None)  # in ms
-
-            # client.send(str(label).encode('utf-8'))
-
-        # client.close()
         result = pd.read_csv(self.config_path)
         if not self.test_flag:
             result['response'] = buttons
@@ -174,13 +177,14 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
     '''
     Main application class
     '''
-    def __init__(self, config_path):
+    def __init__(self, config_path, client):
         super().__init__()
         self.setupUi(self)
         self.update_user_info()
 
         self.write_history = True
         self.config_path = config_path
+        self.client = client
         # self.clear_history()
 
         # draw instructions picture (top widget of the main window)
@@ -251,21 +255,21 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
             filename = f"{self.user_info['username']}_{self.user_info['parameter']}_{self.user_info['another_parameter']}.csv"
 
             cols = x.columns.to_list()
-            cols = cols[:6] + cols[-2:] + cols[6: 13]
+            cols = cols[:6] + cols[-2:] + cols[6: 11]
             x = x[cols]
             self.history = x
             x.to_csv(os.path.join(res_dir, filename), index=False)
             print(self.history)
 
     def build_thread(self, image_path_list, audio_path_list, delays_list,
-                     labels, stim_times, outer_delay_ceil, ip, port, test=False):
+                     labels, stim_times, outer_delay_ceil, test=False):
         '''
         Builds thread where main experiment loop will be executed (including performing stimula)
         '''
         self.thread = QtCore.QThread()
         self.worker = Worker()
-        self.worker.set_params(image_path_list, audio_path_list, delays_list,
-                               labels, stim_times, outer_delay_ceil, ip, port, test, self.config_path)
+        self.worker.set_params(image_path_list, audio_path_list, delays_list, labels,
+            stim_times, outer_delay_ceil, test, self.config_path, self.client)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.thread.started.connect(lambda: self.set_buttons_state(False))
@@ -298,8 +302,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
             self.build_thread(image_path_list, audio_path_list,
                 delays_list, experiment[['label1', 'label2']].to_numpy(),
                 [experiment.first_stim[0], experiment.second_stim[0]],
-                experiment.outer_delay_ceil[0],
-                ip=experiment.ip[0], port=experiment.port[0], test=True
+                experiment.outer_delay_ceil[0]
             )
         except:
             error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
@@ -348,8 +351,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
                 experiment[['audio1', 'audio2']].to_numpy(), 
                 delays_list, experiment[['label1', 'label2']].to_numpy(),
                 [experiment.first_stim[0], experiment.second_stim[0]],
-                experiment.outer_delay_ceil[0],
-                ip=experiment.ip[0], port=experiment.port[0]
+                experiment.outer_delay_ceil[0]
             )
         except:
             error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
@@ -358,15 +360,27 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
 
         self.thread.start()
 
-def main(config_file ):
+def main(config_file, client):
     app = QtWidgets.QApplication(sys.argv)
-    window = AppMainWindow(config_path=config_file)
+    window = AppMainWindow(config_path=config_file, client=client)
     window.show()
     app.exec_()
 
 #if not imported
 if __name__ == '__main__':
 
+    socket_data = pd.read_csv(os.path.join(".", "src", "socket_config.csv"))
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        client.connect((socket_data.ip[0], socket_data.port[0]))
+    except:
+        pass
+
     cfg_dir = os.path.join(".", "cfg")  # config files directory
     for config_file in glob.glob(os.path.join(cfg_dir, "*.csv")):  # for all config files listed in cfg_dir
-        main(config_file=config_file)
+        main(config_file=config_file, client=client)
+    
+    try:
+        client.close()
+    except:
+        pass
