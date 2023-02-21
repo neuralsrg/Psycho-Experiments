@@ -5,173 +5,53 @@ import time
 import socket
 import tempfile
 import glob
-from scipy.io import wavfile
 from threading import Thread
-from playsound import playsound
-from PyQt5 import QtWidgets, QtGui, QtCore
+
 import pandas as pd
 import numpy as np
+from scipy.io import wavfile
+from playsound import playsound
+import tkinter
+from PIL import Image, ImageTk
+from PyQt5 import QtWidgets, QtGui
+
 import windows
 
-class FullscreenImage(QtWidgets.QMainWindow):
-    '''
-    Fullscreen image widget catching press events
-    '''
-    def __init__(self, img_path, parent=None, pause_screen=False):
-        super().__init__(parent)
-        self.setWindowFlags(QtCore.Qt.WindowType.FramelessWindowHint) 
-        self.press_id = None
-        self.press_type = None
-        self.reaction_time = None
-        self.pause_flag = pause_screen
-        self.qimg = QtGui.QImage(img_path)
-        self.showFullScreen()
+class FullScreenImage:
+    def __init__(self):
+        self.response_time = None
+        self.key = None
+        self.button_pressed = False
 
-    def keyPressEvent(self, event):
-        SPACE = 32
-        if event.key() and not self.press_id and int(event.key()) != SPACE:
-            self.reaction_time = time.time()
-            self.press_id = int(event.key())
-            self.press_type = "keyboard"
-        elif event.key() and int(event.key()) == SPACE:
-            self.pause_flag = not self.pause_flag
-            if self.pause_flag:
-                pause_msg = windows.Message("PAUSE", "Current experiment will be paused after this iteration")
-                pause_msg.show()
+    def handler(self, e):
+        self.button_pressed = True
+        self.response_time = (time.time() - self.response_time) * 1000
+        self.key = e.char
 
-    def mousePressEvent(self, event):
-        if event.button() and not self.press_id:
-            self.reaction_time = time.time()
-            self.press_id = int(event.button())
-            self.press_type = "mouse"
-
-    def paintEvent(self, qpaint_event):
-        painter = QtGui.QPainter(self)
-        self.rect = qpaint_event.rect()
-        painter.drawImage(self.rect, self.qimg)
-
-class Worker(QtCore.QObject):
-    '''
-    Worker for running target task in a separate thread
-    '''
-    finished = QtCore.pyqtSignal()
-    progress = QtCore.pyqtSignal(pd.DataFrame)
-
-    def set_params(self, image_path_list, audio_path_list, delays_list, labels,
-                   stim_times, outer_delay_ceil, test, config_path, client):
-        self.image_path_list = image_path_list
-        self.audio_path_list = audio_path_list
-        self.delays_list = delays_list
-        self.labels = labels
-        self.stim_times = stim_times
-        self.outer_delay_ceil = outer_delay_ceil
-        self.test_flag = test
-        self.config_path = config_path
-        self.client = client
-
-    def pause(self):
-        window = FullscreenImage(
-            os.path.join(".", "data", "images", "pause.png"),
-            pause_screen=True
-        )
-        while window.pause_flag:
-            pass
-
-    def terminate(self, result=None):
-        self.progress.emit(result)
-        self.finished.emit()
-
-    def run(self):
-        '''
-        Shows images and plays audios in a loop with some delays after each iteration.
-        All the data about user events will be passed to the main thread in a dictionary.
-        '''
-        def send_message(message):
-            if message:
-                self.client.send(bytes(str(message),"utf-8") + bytes("\n","utf-8"))
-
-        buttons, times = [], []
-        for img_path, audio_path, labels in zip(self.image_path_list, self.audio_path_list,
-                                                self.labels):
-            # first stimul
-
-            # cut file
-            try:
-                fs, s = wavfile.read(audio_path[0])
-                s = s[:int(fs * self.stim_times[0] / 1000)]
-                filename = os.path.join(os.path.dirname(audio_path[0]), next(tempfile._get_candidate_names()) + '.wav')
-                wavfile.write(filename, fs, s)
-            except:
-                error = window.Message("ERRROR!", f"Unable to create temporary .wav (file {audio_path[0]} probably doesn't exist)! " +
-                                                   "This experiment will be terminated...")
-                error.show()
-                self.terminate()
-                return
-
-            window = FullscreenImage(img_path[0])
-
-            # sending label
-            try:
-                sender = Thread(target=send_message, args=(labels[0],))
-                sender.start()
-            except:
-                pass
-
-            # sound
-            play = Thread(target=playsound, args=(filename,))
-            play.start()
-            play.join()
-            os.remove(filename)  # remove temporary file
-            time.sleep(self.delays_list[0] / 1000)
-            if window.pause_flag:
-                self.pause()
-
-            # second stimul
-
-            # cut file
-            try:
-                fs, s = wavfile.read(audio_path[1])
-                s = s[:int(fs * self.stim_times[1] / 1000)]
-                filename = os.path.join(os.path.dirname(audio_path[1]), next(tempfile._get_candidate_names()) + '.wav')
-                wavfile.write(filename, fs, s)
-            except:
-                error = window.Message("ERRROR!", f"Unable to create temporary .wav (file {audio_path[1]} probably doesn't exist)! " +
-                                                   "This experiment will be terminated...")
-                error.show()
-                self.terminate()
-                return
-
-            iteration_start = time.time()
-            window = FullscreenImage(img_path[1])
-
-            # sending label
-            try:
-                sender = Thread(target=send_message, args=(labels[1],))
-                sender.start()
-            except:
-                pass
-
-            # sound
-            play = Thread(target=playsound, args=(filename,))
-            play.start()
-            play.join()
-            os.remove(filename)  # remove temporary file
-            time.sleep(self.delays_list[1] / 1000)
-            time.sleep(np.random.randint(low=0, high=self.outer_delay_ceil) / 1000)
-
-            delta = (window.reaction_time - iteration_start) if window.reaction_time else None
-
-            buttons.append(window.press_id)
-            times.append(delta * 1000 if delta else None)
-            if window.pause_flag:
-                self.pause()
-
-        result = pd.read_csv(self.config_path)
-        if not self.test_flag:
-            result['response'] = buttons
-            result['response_time'] = times
-
-        self.terminate(result)
+    def showPIL(self, pilImage, t):
+        root = tkinter.Tk()
+        pause_var = tkinter.StringVar()
+        w, h = root.winfo_screenwidth(), root.winfo_screenheight()
+        root.overrideredirect(1)
+        root.geometry("%dx%d+0+0" % (w, h))
+        root.focus_set()    
+        canvas = tkinter.Canvas(root,width=w,height=h)
+        canvas.pack()
+        canvas.configure(background='black')
+        imgWidth, imgHeight = pilImage.size
+        if imgWidth > w or imgHeight > h:
+            ratio = min(w/imgWidth, h/imgHeight)
+            imgWidth = int(imgWidth*ratio)
+            imgHeight = int(imgHeight*ratio)
+            pilImage = pilImage.resize((imgWidth,imgHeight), Image.ANTIALIAS)
+        image = ImageTk.PhotoImage(pilImage)
+        imagesprite = canvas.create_image(w/2,h/2,image=image)
+        root.bind("<KeyPress>", self.handler)
+        root.after(t, lambda: root.destroy())
+        self.response_time = time.time()
+        root.mainloop()
+        if not self.button_pressed:
+            self.response_time = None
 
 
 class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
@@ -186,7 +66,8 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         self.write_history = True
         self.config_path = config_path
         self.client = client
-        # self.clear_history()
+        self.response_time = None
+        self.last_pressed_key = None
 
         # draw instructions picture (top widget of the main window)
         scene = QtWidgets.QGraphicsScene()
@@ -208,19 +89,6 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
             "parameter": self.text_input_2.text().strip().replace(' ', '_'),
             "another_parameter": self.text_input_3.text().strip().replace(' ', '_')
         }
-    
-    def clear_history(self):
-        '''
-        Sets history dictionary values to default values
-        '''
-        '''
-        self.history = {
-            "press_id": None,       # pressed keys/buttons history
-            "press_type": None,     # types of events (mouse/keyboard)
-            "reaction_time": None   # reaction time history (in seconds)
-        }
-        '''
-        pass
 
     def user_info_is_correct(self):
         '''
@@ -237,49 +105,20 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         else:
             return True
 
-    def set_buttons_state(self, state):
+    def img_audio_pair(self, image, audio, t, second_flag):
         '''
-        Enables or disables buttons of the main window
+        Shows a pair of image and audio as a stimulus
         '''
-        self.button_1.setEnabled(state)
-        self.button_2.setEnabled(state)
-    
-    def set_history(self, x):
-        '''
-        Experiment history setter
-        '''
-        if self.write_history:
-            res_dir = os.path.join(".", "results")
-            if not os.path.isdir(res_dir):
-                os.mkdir(res_dir)
-
-            filename = f"{self.user_info['username']}_{self.user_info['parameter']}_{self.user_info['another_parameter']}.csv"
-
-            cols = x.columns.to_list()
-            cols = cols[:6] + cols[-2:] + cols[6: 11]
-            x = x[cols]
-            self.history = x
-            x.to_csv(os.path.join(res_dir, filename), index=False)
-            print(self.history)
-
-    def build_thread(self, image_path_list, audio_path_list, delays_list,
-                     labels, stim_times, outer_delay_ceil, test=False):
-        '''
-        Builds thread where main experiment loop will be executed (including performing stimula)
-        '''
-        self.thread = QtCore.QThread()
-        self.worker = Worker()
-        self.worker.set_params(image_path_list, audio_path_list, delays_list, labels,
-            stim_times, outer_delay_ceil, test, self.config_path, self.client)
-        self.worker.moveToThread(self.thread)
-        self.thread.started.connect(self.worker.run)
-        self.thread.started.connect(lambda: self.set_buttons_state(False))
-        self.worker.progress.connect(lambda x: self.set_history(x))
-        self.thread.finished.connect(lambda: self.set_buttons_state(True))
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        # self.thread.finished.connect(lambda: print("Finished a thread!"))
+        image_screen = FullScreenImage()
+        pilImage = Image.open(image)
+        play = Thread(target=playsound, args=(audio,))
+        show = Thread(target=image_screen.showPIL, args=(pilImage, t))
+        play.start()
+        show.start()
+        play.join()
+        show.join()
+        self.response_time = image_screen.response_time
+        self.last_pressed_key = image_screen.key
 
     def test(self):
         '''
@@ -299,32 +138,30 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         audio_path_list = [[os.path.join(".", "data", "audios", "test1.wav")] * 2]
         delays_list = [experiment.inner_delay[0], experiment.outer_delay[0]]
 
-        try:
-            self.build_thread(image_path_list, audio_path_list,
-                delays_list, experiment[['label1', 'label2']].to_numpy(),
-                [experiment.first_stim[0], experiment.second_stim[0]],
-                experiment.outer_delay_ceil[0]
-            )
-        except:
-            error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
-            error.show()
-            return
-
-        self.thread.start()
-        # self.clear_history()
+        for img_path, audio_path, label in zip(image_path_list, audio_path_list, delays_list):
+            for i, stim_t in zip([0, 1], [experiment.first_stim, experiment.second_stim]):
+                fs, s = wavfile.read(audio_path[i])
+                s = s[:int(fs * stim_t[0] / 1000)]
+                filename = os.path.join(os.path.dirname(audio_path[i]), next(tempfile._get_candidate_names()) + '.wav')
+                wavfile.write(filename, fs, s)
+                self.img_audio_pair(img_path[i], filename, int(stim_t[0]), False)
+                os.remove(filename)
+                time.sleep(delays_list[i] / 1000)
 
     def start_experiment(self):
         '''
         This function is called whenever 'Start' button is pressed.
         Creates a thread which shows images and plays audios in a loop with some delays after each iteration.
         '''
+        def send_message(message):
+            if message:
+                self.client.send(bytes(str(message),"utf-8") + bytes("\n","utf-8"))
+
         self.write_history = True
         # user's inputs dictionary stuff
         self.update_user_info()
         if not self.user_info_is_correct():
             return
-        else:
-            self.hide() # hide main application window
 
         # This data will be read from some files.
         try:
@@ -344,32 +181,63 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         experiment['audio1'] = audios_dir + os.sep + experiment['audio1']
         experiment['audio2'] = audios_dir + os.sep + experiment['audio2']
 
+        outer_delay_ceil = experiment['outer_delay_ceil'][0]
+        labels = experiment[['label1', 'label2']].to_numpy()
+
+        images_dir = experiment[['image1', 'image2']].to_numpy()
+        audios_dir = experiment[['audio1', 'audio2']].to_numpy()
+
         delays_list = [experiment.inner_delay[0], experiment.outer_delay[0]]
 
-        try:
-            self.build_thread(
-                experiment[['image1', 'image2']].to_numpy(), 
-                experiment[['audio1', 'audio2']].to_numpy(), 
-                delays_list, experiment[['label1', 'label2']].to_numpy(),
-                [experiment.first_stim[0], experiment.second_stim[0]],
-                experiment.outer_delay_ceil[0]
-            )
-        except:
-            error = windows.Message("ERROR!", "Unable to build thread task (passed data is probably incorrect)!")
-            error.show()
-            return
+        buttons, times = [], []
+        for img_path, audio_path, label in zip(images_dir, audios_dir, labels):
+            for i, stim_t in zip([0, 1], [experiment.first_stim[0], experiment.second_stim[0]]):
+                fs, s = wavfile.read(audio_path[i])
+                s = s[:int(fs * stim_t / 1000)]
+                filename = os.path.join(os.path.dirname(audio_path[i]), next(tempfile._get_candidate_names()) + '.wav')
+                wavfile.write(filename, fs, s)
+                try:
+                    sender = Thread(target=send_message, args=(label[i],))
+                    sender.start()
+                except:
+                    pass
+                self.img_audio_pair(img_path[i], filename, int(stim_t), bool(i))
+                os.remove(filename)
+                time.sleep(delays_list[i] / 1000)
+            time.sleep(np.random.randint(low=0, high=outer_delay_ceil) / 1000)
+            buttons.append(self.last_pressed_key)
+            times.append(self.response_time)
 
-        self.thread.start()
+        result = pd.read_csv(self.config_path)
+        result['response'] = buttons
+        result['response_time'] = times
+
+        res_dir = os.path.join(".", "results")
+        if not os.path.isdir(res_dir):
+            os.mkdir(res_dir)
+
+        filename = f"{self.user_info['username']}_{self.user_info['parameter']}_{self.user_info['another_parameter']}.csv"
+        x = pd.DataFrame(result)
+        cols = x.columns.to_list()
+        cols = cols[:6] + cols[-2:] + cols[6: 11]
+        x = x[cols]
+        self.history = x
+        x.to_csv(os.path.join(res_dir, filename), index=False)
+        print(self.history)
+
+        self.destroy()
+        self.app.quit()
+        
 
 def main(config_file, client):
     app = QtWidgets.QApplication(sys.argv)
     window = AppMainWindow(config_path=config_file, client=client)
+    window.app = app
     window.show()
     app.exec_()
 
 #if not imported
 if __name__ == '__main__':
-
     socket_data = pd.read_csv(os.path.join(".", "src", "socket_config.csv"))
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
