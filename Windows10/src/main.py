@@ -14,6 +14,7 @@ from playsound import playsound
 import tkinter
 from PIL import Image, ImageTk
 from PyQt5 import QtWidgets, QtGui
+import serial
 
 import windows
 
@@ -58,7 +59,7 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
     '''
     Main application class
     '''
-    def __init__(self, config_path, client):
+    def __init__(self, config_path, client, ser):
         super().__init__()
         self.setupUi(self)
         self.update_user_info()
@@ -66,12 +67,13 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         self.write_history = True
         self.config_path = config_path
         self.client = client
+        self.ser = ser
         self.response_time = None
         self.last_pressed_key = None
 
         # draw instructions picture (top widget of the main window)
         scene = QtWidgets.QGraphicsScene()
-        pixmap = QtGui.QPixmap(os.path.join(".", "data", "images", "test2.jpeg"))
+        pixmap = QtGui.QPixmap(os.path.join(".", "data", "images", "instructions.png"))
         item = QtWidgets.QGraphicsPixmapItem(pixmap)
         scene.addItem(item)
         self.instructions_graphics_viewer.setScene(scene)
@@ -155,7 +157,9 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         '''
         def send_message(message):
             if message:
+                self.ser.rts = True
                 self.client.send(bytes(str(message),"utf-8") + bytes("\n","utf-8"))
+                self.ser.rts = False
 
         self.write_history = True
         # user's inputs dictionary stuff
@@ -229,9 +233,9 @@ class AppMainWindow(QtWidgets.QMainWindow, windows.Ui_MainWindow):
         self.app.quit()
         
 
-def main(config_file, client):
+def main(config_file, client, ser):
     app = QtWidgets.QApplication(sys.argv)
-    window = AppMainWindow(config_path=config_file, client=client)
+    window = AppMainWindow(config_path=config_file, client=client, ser=ser)
     window.app = app
     window.show()
     app.exec_()
@@ -240,6 +244,8 @@ def main(config_file, client):
 if __name__ == '__main__':
     socket_data = pd.read_csv(os.path.join(".", "src", "socket_config.csv"))
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ser = serial.Serial('COM3', 19200, timeout=1)
+    ser.rts, ser.dtr = False, False
     try:
         client.connect((socket_data.ip[0], socket_data.port[0]))
     except:
@@ -247,7 +253,7 @@ if __name__ == '__main__':
 
     cfg_dir = os.path.join(".", "cfg")  # config files directory
     for config_file in glob.glob(os.path.join(cfg_dir, "*.csv")):  # for all config files listed in cfg_dir
-        main(config_file=config_file, client=client)
+        main(config_file=config_file, client=client, ser=ser)
     
     try:
         client.close()
