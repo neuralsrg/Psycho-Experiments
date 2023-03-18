@@ -9,8 +9,19 @@ ________________________________________________________________________________
 ### Details
 - Tested for Windows 10 and Ubuntu 20.04 with Python 3.8 installed.
 - Running:
+Linux:
 ```sh
 cd Psycho-Experiments
 python ./src/server.py  # test server  (or run your own alternatively)
 python ./src/main.py
+```
+Windows:
+```sh
+cd Psycho-Experiments
+
+python ./src/server.py  # test server FOR A SINGLE EXPERIMENT  (or run your own alternatively)
+
+python ./src/iterator.py # HIGHLY RECOMMENDED WAY
+or
+python ./src/main.py <PATH_TO_YOUR_CSV> # for a single run (not recommended)
 ```
