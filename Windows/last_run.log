@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "./src/main.py", line 340, in <module>
+    main(path)
+  File "./src/main.py", line 332, in main
+    experiment(config_file=path, client=client, ser=ser, path=path)
+  File "./src/main.py", line 308, in experiment
+    checker(path)
+  File "./src/main.py", line 305, in checker
+    raise FileNotFoundError(f"{objective} file {needed} not found")
+FileNotFoundError: image2 file test.png not found
+____________________________________________________________________________________________________
+Logfile created at 18:25:25
+Experiment path: C:\Users\Username\Desktop\Psycho-Experiments\cfg\1ser.csv
+____________________________________________________________________________________________________

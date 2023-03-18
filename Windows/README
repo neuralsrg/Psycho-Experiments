@@ -1,0 +1,3 @@
+Run python ./src/iterator.py to iterate through all the .csv experiments from ./cfg (check examples there).
+Alternatively (not recommended): python ./src/main.py <PATH_TO_YOUR_EXPERIMENT>
+

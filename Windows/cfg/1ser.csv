@@ -1,0 +1,7 @@
+label1,image1,audio1,label2,image2,audio2,inner_delay,outer_delay,first_stim,second_stim,outer_delay_ceil
+317,test1.bmp,zw.wav,1,test2.jpeg,zw.wav,1000,1000,1000,1000,100
+2,test1.bmp,zw.wav,2,test2.jpeg,zw.wav,,,,,
+3,test1.bmp,zw.wav,3,test2.jpeg,zw.wav,,,,,
+4,test1.bmp,zw.wav,4,test2.jpeg,zw.wav,,,,,
+5,test1.bmp,zw.wav,5,test2.jpeg,zw.wav,,,,,
+6,test1.bmp,zw.wav,6,test2.jpeg,zw.wav,,,,,

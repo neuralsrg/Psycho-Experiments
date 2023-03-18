@@ -33,7 +33,7 @@ class Ui_MainWindow(object):
         self.input_label_2 = QtWidgets.QLabel(self.centralwidget)
         self.input_label_2.setObjectName("input_label_2")
         self.inputLayout_2.addWidget(self.input_label_2)
-        self.text_input_2 = QtWidgets.QLineEdit(self.centralwidget)
+        self.text_input_2 = QtWidgets.QLineEdit(self.centralwidget, placeholderText="Optional field")
         self.text_input_2.setObjectName("text_input_2")
         self.inputLayout_2.addWidget(self.text_input_2)
         self.inputsLayout.addLayout(self.inputLayout_2)
@@ -43,7 +43,7 @@ class Ui_MainWindow(object):
         self.input_label_3 = QtWidgets.QLabel(self.centralwidget)
         self.input_label_3.setObjectName("input_label_3")
         self.inputLayout_3.addWidget(self.input_label_3)
-        self.text_input_3 = QtWidgets.QLineEdit(self.centralwidget)
+        self.text_input_3 = QtWidgets.QLineEdit(self.centralwidget, placeholderText="Optional field")
         self.text_input_3.setObjectName("text_input_3")
         self.inputLayout_3.addWidget(self.text_input_3)
         self.inputsLayout.addLayout(self.inputLayout_3)
@@ -78,7 +78,7 @@ class Ui_MainWindow(object):
         self.input_label_2.setText(_translate("MainWindow", "Parameter"))
         self.input_label_3.setText(_translate("MainWindow", "Another parameter"))
         self.button_1.setText(_translate("MainWindow", "Start"))
-        self.button_2.setText(_translate("MainWindow", "Test"))
+        self.button_2.setText(_translate("MainWindow", "Next experiment"))
 
 class Message:
     def __init__(self, msg1="ERROR!", msg2="ERROR!"):
