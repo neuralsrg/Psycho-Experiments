@@ -16,6 +16,13 @@ python ./src/server.py  # test server  (or run your own alternatively)
 python ./src/main.py
 ```
 Windows:
+Install packages using
+```sh
+python -m pip install --upgrade pip
+pip install --upgrade wheel
+pip install -r requirements.txt
+```
+To run application
 ```sh
 cd Psycho-Experiments
 
